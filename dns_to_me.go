@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/PuerkitoBio/goquery"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"io/ioutil"
@@ -16,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -87,6 +87,7 @@ var defaultTransport http.RoundTripper = &http.Transport{
 	TLSHandshakeTimeout:   15 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
 }
+var client = &http.Client{Transport: defaultTransport}
 
 func main() {
 	// prepare logger
@@ -109,7 +110,7 @@ func main() {
 		config := readConfig()
 		wanIp := getPublicIp()
 		updateDns(wanIp, config)
-		time.Sleep(time.Duration(10) * time.Minute)
+		time.Sleep(10 * time.Minute)
 	}
 }
 
@@ -133,7 +134,7 @@ func updateDns(ip string, config Config) {
 	}
 	req1.URL.RawQuery = q1.Encode()
 	log.WithFields(log.Fields{"url": req1.URL.String()}).Infof("Request")
-	resp1, err1 := http.DefaultClient.Do(req1)
+	resp1, err1 := client.Do(req1)
 	if err1 != nil || resp1.StatusCode != http.StatusOK {
 		log.WithFields(log.Fields{"resp1": resp1, "err1": err1}).Errorf("Request error")
 		return
@@ -177,7 +178,7 @@ func updateDns(ip string, config Config) {
 	}
 	req2.URL.RawQuery = q2.Encode()
 	log.WithFields(log.Fields{"url": req2.URL.String()}).Infof("Request")
-	resp2, err2 := http.DefaultClient.Do(req2)
+	resp2, err2 := client.Do(req2)
 	if err2 != nil || resp2.StatusCode != http.StatusOK {
 		log.WithFields(log.Fields{"resp2": resp2, "err2": err2}).Errorf("Request error")
 		return
@@ -213,15 +214,14 @@ func createNewParam(config Config) RawRequestParam {
 }
 
 func getPublicIp() string {
-	client := &http.Client{Transport: defaultTransport}
-	resp, err := client.Get("http://192.168.1.1/getpage.gch?pid=1002&nextpage=status_ethwan_if_t.gch")
+	resp, err := client.Get("http://ip-api.com/line/?fields=query")
 	if err != nil {
 		log.WithError(err).Fatalf("Request WAN IP failed")
 		return ""
 	}
 	defer resp.Body.Close()
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	wanIp := doc.Find("#TestContent > tbody > tr:nth-child(4) > td.tdright").Text()
+	doc, err := ioutil.ReadAll(resp.Body)
+	wanIp := strings.TrimSpace(fmt.Sprintf("%s", doc))
 	log.WithFields(log.Fields{
 		"statusCode": resp.StatusCode,
 		"wanIp":      wanIp,
