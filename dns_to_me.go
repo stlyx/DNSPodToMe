@@ -94,10 +94,9 @@ func main() {
 	log.SetOutput(os.Stdout)
 	log.SetLevel(log.InfoLevel)
 	log.SetFormatter(&log.TextFormatter{
-		ForceColors:   true,
 		FullTimestamp: true,
 	})
-	logfile, err := os.OpenFile(fmt.Sprintf("dns-to-me-%v.log", time.Now().Unix()), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logfile, err := os.OpenFile("dns-to-me.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.WithField("error", err).Fatalf("Log file unavailable.")
 	}
@@ -105,16 +104,18 @@ func main() {
 	log.SetOutput(io.MultiWriter(os.Stdout, logfile))
 
 	// main loop
-	for {
+	{
 		log.Infof("====== New Loop ======")
 		config := readConfig()
 		wanIp := getPublicIp()
-		updateDns(wanIp, config)
-		time.Sleep(10 * time.Minute)
+		wanIpv6 := getPublicIpv6()
+		updateDns(wanIp, config, false)
+		updateDns(wanIpv6, config, true)
+		time.Sleep(10 * time.Second)
 	}
 }
 
-func updateDns(ip string, config Config) {
+func updateDns(ip string, config Config, isV6 bool) {
 	if ip == "" {
 		log.Errorf("TARGET IP INCORRECT.")
 		return
@@ -146,7 +147,10 @@ func updateDns(ip string, config Config) {
 	log.WithFields(log.Fields{"body1": rl}).Debugf("Request done")
 	var toModRecord DNSRecord
 	for _, dnsRecord := range rl.Data.Records {
-		if dnsRecord.Type == "A" && dnsRecord.Name == config.SubDomain {
+		if !isV6 && dnsRecord.Type == "A" && dnsRecord.Name == config.SubDomain {
+			toModRecord = dnsRecord
+			break
+		} else if isV6 && dnsRecord.Type == "AAAA" && dnsRecord.Name == config.SubDomain {
 			toModRecord = dnsRecord
 			break
 		}
@@ -227,6 +231,22 @@ func getPublicIp() string {
 		"wanIp":      wanIp,
 	}).Infof("Got the WAN IP")
 	return wanIp
+}
+
+func getPublicIpv6() string {
+	resp, err := client.Get("http://v6.ipv6-test.com/api/myip.php")
+	if err != nil {
+		log.WithError(err).Fatalf("Request WAN IP failed")
+		return ""
+	}
+	defer resp.Body.Close()
+	doc, err := ioutil.ReadAll(resp.Body)
+	wanIpv6 := strings.TrimSpace(fmt.Sprintf("%s", doc))
+	log.WithFields(log.Fields{
+		"statusCode": resp.StatusCode,
+		"wanIpv6":    wanIpv6,
+	}).Infof("Got the WAN IPv6")
+	return wanIpv6
 }
 
 func readConfig() (result Config) {
